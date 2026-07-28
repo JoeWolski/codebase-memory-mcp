@@ -101,6 +101,23 @@ TEST(agent_profiles_direct_dialects_are_coverage_aware_and_read_only) {
     PASS();
 }
 
+TEST(agent_profiles_codex_uses_parent_mcp_configuration) {
+    for (int tier = 0; tier < (int)CBM_GRAPH_TIER_COUNT; tier++) {
+        char *profile = cbm_render_graph_profile(CBM_GRAPH_DIALECT_CODEX,
+                                                 (cbm_graph_tier_t)tier,
+                                                 CBM_GRAPH_ACCESS_DIRECT, NULL);
+        bool valid = profile && strstr(profile, "name = \"codebase-memory") != NULL &&
+                     strstr(profile, "developer_instructions") != NULL &&
+                     strstr(profile, "[mcp_servers.") == NULL &&
+                     strstr(profile, "enabled_tools") == NULL;
+        free(profile);
+        if (!valid) {
+            FAIL("Codex roles must inherit MCP servers from the parent configuration");
+        }
+    }
+    PASS();
+}
+
 TEST(agent_profiles_tiers_encode_distinct_evidence_budgets) {
     char *scout = cbm_render_graph_profile(CBM_GRAPH_DIALECT_CLAUDE, CBM_GRAPH_TIER_SCOUT,
                                            CBM_GRAPH_ACCESS_DIRECT, NULL);
@@ -269,6 +286,7 @@ TEST(agent_profiles_render_deterministically_and_reject_invalid_inputs) {
 SUITE(agent_profiles) {
     RUN_TEST(agent_profiles_stable_tier_identity);
     RUN_TEST(agent_profiles_direct_dialects_are_coverage_aware_and_read_only);
+    RUN_TEST(agent_profiles_codex_uses_parent_mcp_configuration);
     RUN_TEST(agent_profiles_tiers_encode_distinct_evidence_budgets);
     RUN_TEST(agent_profiles_handoff_requires_parent_evidence_without_child_mcp);
     RUN_TEST(agent_profiles_handoff_only_dialects_fail_closed_for_direct_access);

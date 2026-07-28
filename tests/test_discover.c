@@ -624,6 +624,57 @@ TEST(discover_cbmignore_negates_global_ignore) {
     PASS();
 }
 
+/* A committed .cbmignore negation can re-include a subtree rejected by the
+ * repository .gitignore. This allows projects to index selected generated
+ * interfaces without changing their source-control ignore policy. */
+TEST(discover_cbmignore_negates_repo_gitignore) {
+    char *base = th_mktempdir("cbm_disc_repo_neg");
+    ASSERT(base != NULL);
+
+    th_write_file(TH_PATH(base, ".gitignore"), ".toolchain/\n");
+    th_write_file(TH_PATH(base, ".cbmignore"),
+                  "!/.toolchain/\n"
+                  "!/.toolchain/x86_64-linux/\n"
+                  "!/.toolchain/x86_64-linux/*/\n"
+                  "!/.toolchain/x86_64-linux/*/packages/\n"
+                  "!/.toolchain/x86_64-linux/*/packages/**/\n"
+                  "!/.toolchain/x86_64-linux/*/packages/**/*.h\n"
+                  "!/.toolchain/x86_64-linux/*/packages/**/third_party.cmake\n");
+    th_write_file(TH_PATH(base,
+                          ".toolchain/x86_64-linux/toolchain-hash/packages/example/"
+                          "install/include/example/api.h"),
+                  "#pragma once\n");
+    th_write_file(TH_PATH(base, ".toolchain/x86_64-linux/toolchain-hash/packages/third_party.cmake"),
+                  "set(EXAMPLE_ENABLED ON)\n");
+    th_write_file(TH_PATH(base, ".toolchain/x86_64-linux/toolchain-hash/sysroot/include/leaked.h"),
+                  "#pragma once\n");
+    th_write_file(TH_PATH(base,
+                          ".toolchain/x86_64-linux/toolchain-hash/cross-toolchain/include/leaked.h"),
+                  "#pragma once\n");
+    th_write_file(TH_PATH(base, ".toolchain/aarch64-linux/toolchain-hash/packages/foreign.h"),
+                  "#pragma once\n");
+
+    cbm_file_info_t *files = NULL;
+    int count = 0;
+    cbm_discover_opts_t opts = {.mode = CBM_MODE_FULL};
+    ASSERT_EQ(cbm_discover(base, &opts, &files, &count), 0);
+    ASSERT_TRUE(discover_has_rel_path(
+        files, count,
+        ".toolchain/x86_64-linux/toolchain-hash/packages/example/install/include/example/api.h"));
+    ASSERT_TRUE(discover_has_rel_path(
+        files, count, ".toolchain/x86_64-linux/toolchain-hash/packages/third_party.cmake"));
+    ASSERT_FALSE(discover_has_rel_path(
+        files, count, ".toolchain/x86_64-linux/toolchain-hash/sysroot/include/leaked.h"));
+    ASSERT_FALSE(discover_has_rel_path(
+        files, count, ".toolchain/x86_64-linux/toolchain-hash/cross-toolchain/include/leaked.h"));
+    ASSERT_FALSE(discover_has_rel_path(files, count,
+                                       ".toolchain/aarch64-linux/toolchain-hash/packages/foreign.h"));
+
+    cbm_discover_free(files, count);
+    th_cleanup(base);
+    PASS();
+}
+
 /* issue #234: a directory listed in the root .gitignore (e.g. "vendor/") must
  * be excluded from discovery even when untracked — Composer/PHP projects rely
  * on this. */
@@ -1439,6 +1490,7 @@ SUITE(discover) {
     RUN_TEST(discover_repo_local_excludesfile_is_ignored);
     RUN_TEST(discover_missing_global_excludes_is_noop);
     RUN_TEST(discover_cbmignore_negates_global_ignore);
+    RUN_TEST(discover_cbmignore_negates_repo_gitignore);
     RUN_TEST(discover_gitignore_dir_excluded_issue234);
     RUN_TEST(discover_max_file_size);
     RUN_TEST(discover_null_path);

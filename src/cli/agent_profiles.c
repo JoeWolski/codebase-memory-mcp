@@ -479,12 +479,6 @@ static bool render_profile_text(profile_buffer_t *buffer, cbm_graph_profile_dial
             !profile_buffer_append(buffer, prompt) || !profile_buffer_append(buffer, "\"\"\"\n")) {
             return false;
         }
-        if (direct && (!profile_buffer_append(
-                           buffer, "\n[mcp_servers.codebase-memory-mcp]\nenabled_tools = [") ||
-                       !append_toml_mcp_tools(buffer, dialect, tier, false) ||
-                       !profile_buffer_append(buffer, "]\n"))) {
-            return false;
-        }
         return true;
     case CBM_GRAPH_DIALECT_GEMINI:
         if (!append_yaml_identity(buffer, slug, description) ||

@@ -63,20 +63,22 @@ snapshots/
 
 ## Precedence
 
-Discovery applies its filters in a fixed order — the first layer that rejects
-a path wins. For directories:
+Discovery applies its filters in a fixed order. A `.cbmignore` negation can
+explicitly re-include a path rejected by repository, nested, or global Git
+ignore rules. For directories:
 
 1. **Built-in skip list** — `.git`, `node_modules`, `dist`, `target`,
    `vendor`, tool caches, etc. (60+ names; the fast/moderate index modes add
-   more, e.g. `docs`, `examples`, `testdata`). Not overridable from any
-   ignore file today.
+   more, e.g. `docs`, `examples`, `testdata`). A `.cbmignore` negation can
+   re-include ordinary skip-list directories, but never the safety core:
+   `.git`, `node_modules`, `.worktrees`, or `.claude-worktrees`.
 2. **Repo `.gitignore`** — `<repo>/.gitignore` merged with
    `<git-common-dir>/info/exclude` (worktree-aware); later patterns win on
    conflict. Honored even when the indexed directory is not a git repo root.
 3. **Nested `.gitignore` files** — picked up during the walk and matched
    relative to their own directory.
-4. **`.cbmignore`** — a positive match skips the path; a negated match can
-   only rescue paths from layer 5.
+4. **`.cbmignore`** — a positive match skips the path; a negated match
+   re-includes paths rejected by layers 2, 3, or 5.
 5. **Git global excludes** — `core.excludesFile` from `~/.gitconfig` or the
    XDG git config (default `$XDG_CONFIG_HOME/git/ignore`); consulted only
    when the project is a git repo with a config.
@@ -96,26 +98,21 @@ always skipped.
   walk never descends into it — you cannot re-include a file whose parent
   directory is excluded. Negate the directory itself if you need its
   contents.
-- **Across layers**: a `.cbmignore` negation overrides the **git global
-  excludes** layer only. Example: your `~/.config/git/ignore` ignores
-  `*.sql`, but this project's SQL should be indexed — add `!*.sql` to
-  `.cbmignore`. Negation cannot override the built-in skip lists, the repo
-  `.gitignore`/`info/exclude`, nested `.gitignore` files, the built-in
-  suffix/filename filters, or the size cap.
+- **Across layers**: a `.cbmignore` negation overrides repository
+  `.gitignore`/`info/exclude`, nested `.gitignore`, and Git global excludes.
+  It also re-includes ordinary built-in skip-list directories such as `obj/`,
+  `dist/`, and `target/`. It cannot override the safety core (`.git`,
+  `node_modules`, `.worktrees`, `.claude-worktrees`), built-in suffix or
+  filename filters, fast-mode filters, symlink handling, or the size cap.
 
-### Planned (not yet implemented)
+For example, to index a toolchain subtree while leaving it ignored by Git:
 
-The negation story is being unified; none of the following works yet:
+```gitignore
+!/.toolchain/
+!/.toolchain/**/third_party.cmake
+```
 
-- `!` in `.cbmignore` will be able to un-skip ordinary built-in skip
-  directories (`obj/`, `dist/`, `target/`, …) so build-output-like
-  directories that actually contain source can be indexed.
-- A small safety core stays non-negatable by design — `.git`,
-  `node_modules`, and worktree-internal directories — because indexing them
-  risks OOM and correctness issues (see issue #489).
-- Auxiliary filesystem walkers will honor the same ignore predicate as
-  discovery, so every code path sees an identical ignore decision
-  (unification tracked in a follow-up issue).
-
-Until these land, the "Precedence" and "Negation — current behavior" sections
-above describe the actual behavior.
+The re-included subtree still passes the normal source-file filters, so object
+files, libraries, archives, and other unsupported files remain excluded. Add
+another negated pattern for any file-level `.gitignore` rule that also matches
+a file you want to index.

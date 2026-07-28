@@ -548,6 +548,42 @@ static const char *local_rel_path(const char *rel_path, const char *local_prefix
     return rel_path;
 }
 
+/* A directory rule such as ".toolchain/" applies to everything below it.
+ * cbm_gitignore_match_result() intentionally evaluates one path only, so the
+ * walker must evaluate the path's directory ancestors as directories too.
+ * .cbmignore is deliberately not passed through this helper: its negations
+ * must remain explicit so opening an ignored ancestor does not re-include all
+ * of its descendants. */
+static bool gitignore_matches_path_or_ancestor(const cbm_gitignore_t *gi, const char *rel_path,
+                                               bool is_dir) {
+    if (!gi || !rel_path || rel_path[0] == '\0') {
+        return false;
+    }
+
+    int result = 0;
+    char candidate[CBM_SZ_4K];
+    size_t path_len = strlen(rel_path);
+    if (path_len >= sizeof(candidate)) {
+        return cbm_gitignore_matches(gi, rel_path, is_dir);
+    }
+
+    for (const char *slash = strchr(rel_path, '/'); slash; slash = strchr(slash + SKIP_ONE, '/')) {
+        size_t candidate_len = (size_t)(slash - rel_path);
+        memcpy(candidate, rel_path, candidate_len);
+        candidate[candidate_len] = '\0';
+        int candidate_result = cbm_gitignore_match_result(gi, candidate, true);
+        if (candidate_result != 0) {
+            result = candidate_result;
+        }
+    }
+
+    int path_result = cbm_gitignore_match_result(gi, rel_path, is_dir);
+    if (path_result != 0) {
+        result = path_result;
+    }
+    return result > 0;
+}
+
 /* Non-negatable safety core: built-in skip dirs that a .cbmignore negation
  * can NEVER un-skip. A repo-committed .cbmignore must not be able to defeat
  * OOM/safety skips: .git holds VCS internals (and the info/exclude sources,
@@ -567,35 +603,34 @@ static bool should_skip_directory(const char *entry_name, const char *rel_path,
                                   const cbm_gitignore_t *global_gi,
                                   const cbm_gitignore_t *cbmignore, const cbm_gitignore_t *local_gi,
                                   const char *local_gi_prefix) {
+    int cbm_result = cbmignore ? cbm_gitignore_match_result(cbmignore, rel_path, true) : 0;
+    bool reinclude = cbm_result < 0;
     if (cbm_should_skip_dir(entry_name, opts ? opts->mode : CBM_MODE_FULL)) {
         /* #500: a .cbmignore negation (e.g. "!obj/") whose rule is the last
          * match for this dir un-skips a built-in skip-list dir — except the
-         * non-negatable safety core. Fall through so .gitignore/global/local
-         * rules still apply to the un-skipped dir. */
-        bool unskipped = cbmignore && !is_safety_core_dir(entry_name) &&
-                         cbm_gitignore_match_result(cbmignore, rel_path, true) < 0;
+         * non-negatable safety core. A re-inclusion also overrides matching
+         * Git ignore rules for the directory. */
+        bool unskipped = !is_safety_core_dir(entry_name) && reinclude;
         if (!unskipped) {
             return true;
         }
     }
-    if (gitignore && cbm_gitignore_matches(gitignore, rel_path, true)) {
+    if (gitignore && gitignore_matches_path_or_ancestor(gitignore, rel_path, true) && !reinclude) {
         return true;
     }
-    bool global_ignored = global_gi && cbm_gitignore_matches(global_gi, rel_path, true);
+    bool global_ignored =
+        global_gi && gitignore_matches_path_or_ancestor(global_gi, rel_path, true);
     if (local_gi) {
         const char *lrel = local_rel_path(rel_path, local_gi_prefix);
-        if (cbm_gitignore_matches(local_gi, lrel, true)) {
+        if (gitignore_matches_path_or_ancestor(local_gi, lrel, true) && !reinclude) {
             return true;
         }
     }
-    if (cbmignore) {
-        int cbm_result = cbm_gitignore_match_result(cbmignore, rel_path, true);
-        if (cbm_result > 0) {
-            return true;
-        }
-        if (cbm_result < 0 && global_ignored) {
-            return false;
-        }
+    if (cbm_result > 0) {
+        return true;
+    }
+    if (reinclude && global_ignored) {
+        return false;
     }
     return global_ignored;
 }
@@ -603,8 +638,8 @@ static bool should_skip_directory(const char *entry_name, const char *rel_path,
 /* Check if a regular file should be skipped (filters + gitignore + size). */
 /* Classify why a file is skipped. Returns a static reason string (the #963
  * "purposely not indexed" class) or NULL to keep the file. Check order and
- * semantics — including the .cbmignore negation un-ignoring a global-gitignore
- * match — are IDENTICAL to the original boolean predicate. */
+ * semantics — including .cbmignore re-inclusions overriding Git ignore rules
+ * — are IDENTICAL to the original boolean predicate. */
 static const char *file_skip_reason(const char *entry_name, const char *rel_path,
                                     const cbm_discover_opts_t *opts,
                                     const cbm_gitignore_t *gitignore,
@@ -622,24 +657,24 @@ static const char *file_skip_reason(const char *entry_name, const char *rel_path
     if (cbm_matches_fast_pattern(entry_name, mode)) {
         return "fast-pattern";
     }
-    if (gitignore && cbm_gitignore_matches(gitignore, rel_path, false)) {
+    int cbm_result = cbmignore ? cbm_gitignore_match_result(cbmignore, rel_path, false) : 0;
+    bool reinclude = cbm_result < 0;
+    if (gitignore && gitignore_matches_path_or_ancestor(gitignore, rel_path, false) && !reinclude) {
         return "gitignore";
     }
-    bool global_ignored = global_gi && cbm_gitignore_matches(global_gi, rel_path, false);
+    bool global_ignored =
+        global_gi && gitignore_matches_path_or_ancestor(global_gi, rel_path, false);
     if (local_gi) {
         const char *lrel = local_rel_path(rel_path, local_gi_prefix);
-        if (cbm_gitignore_matches(local_gi, lrel, false)) {
+        if (gitignore_matches_path_or_ancestor(local_gi, lrel, false) && !reinclude) {
             return "gitignore";
         }
     }
-    if (cbmignore) {
-        int cbm_result = cbm_gitignore_match_result(cbmignore, rel_path, false);
-        if (cbm_result > 0) {
-            return "cbmignore";
-        }
-        if (cbm_result < 0 && global_ignored) {
-            global_ignored = false;
-        }
+    if (cbm_result > 0) {
+        return "cbmignore";
+    }
+    if (reinclude && global_ignored) {
+        global_ignored = false;
     }
     if (opts && opts->max_file_size > 0 && file_size > opts->max_file_size) {
         return "size-cap";
