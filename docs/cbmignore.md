@@ -86,33 +86,37 @@ ignore rules. For directories:
 For files, built-in suffix filters (`.png`, `.o`, `.db`, …; fast modes add
 archives, media, lockfiles, `.min.js`, …) and fast-mode filename/substring
 filters run **before** the ignore files, and a maximum-file-size cap runs
-after them; none of these are overridable from `.cbmignore`. Symlinks are
-always skipped.
+after them; none of these are overridable from `.cbmignore`.
 
-## Negation (`!`) — current behavior
+## Negation (`!`)
 
 - **Within `.cbmignore`**: standard gitignore semantics. Patterns are
   evaluated top to bottom and the last matching pattern wins, so
   `!pattern` re-includes something an earlier line excluded.
-- **Parent pruning** (same caveat as git): when a directory is excluded, the
-  walk never descends into it — you cannot re-include a file whose parent
-  directory is excluded. Negate the directory itself if you need its
-  contents.
+- **Full include overrides**: a negated glob opens every ignored ancestor
+  needed to reach files it can match. You only need the file glob itself; do
+  not add separate negations for each parent directory. Ancestors are opened
+  for traversal only, not indexed by that fact.
 - **Across layers**: a `.cbmignore` negation overrides repository
   `.gitignore`/`info/exclude`, nested `.gitignore`, and Git global excludes.
   It also re-includes ordinary built-in skip-list directories such as `obj/`,
   `dist/`, and `target/`. It cannot override the safety core (`.git`,
   `node_modules`, `.worktrees`, `.claude-worktrees`), built-in suffix or
-  filename filters, fast-mode filters, symlink handling, or the size cap.
+  filename filters, fast-mode filters, or the size cap.
+- **Symlinks**: on POSIX, a symlink is followed only when a negated rule
+  directly matches it or could match a descendant through it. Its resolved
+  target must remain inside the indexed repository. Other symlinks remain
+  skipped.
 
 For example, to index a toolchain subtree while leaving it ignored by Git:
 
 ```gitignore
-!/.toolchain/
-!/.toolchain/**/third_party.cmake
+!/.toolchain/x86_64-linux/packages/**/*.h
+!/.toolchain/x86_64-linux/packages/**/*.hh
+!/.toolchain/x86_64-linux/packages/**/*.hpp
 ```
 
-The re-included subtree still passes the normal source-file filters, so object
-files, libraries, archives, and other unsupported files remain excluded. Add
-another negated pattern for any file-level `.gitignore` rule that also matches
-a file you want to index.
+This follows the active `packages` symlink without traversing other toolchain
+cache directories. The re-included files still pass the normal source-file
+filters, so object files, libraries, archives, and other unsupported files
+remain excluded.

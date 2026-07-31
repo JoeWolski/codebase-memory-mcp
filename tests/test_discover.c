@@ -628,31 +628,33 @@ TEST(discover_cbmignore_negates_global_ignore) {
  * repository .gitignore. This allows projects to index selected generated
  * interfaces without changing their source-control ignore policy. */
 TEST(discover_cbmignore_negates_repo_gitignore) {
+#ifdef _WIN32
+    SKIP_PLATFORM("Windows: explicitly included directory symlinks are POSIX-only");
+#else
     char *base = th_mktempdir("cbm_disc_repo_neg");
     ASSERT(base != NULL);
 
     th_write_file(TH_PATH(base, ".gitignore"), ".toolchain/\n");
     th_write_file(TH_PATH(base, ".cbmignore"),
-                  "!/.toolchain/\n"
-                  "!/.toolchain/x86_64-linux/\n"
-                  "!/.toolchain/x86_64-linux/*/\n"
-                  "!/.toolchain/x86_64-linux/*/packages/\n"
-                  "!/.toolchain/x86_64-linux/*/packages/**/\n"
-                  "!/.toolchain/x86_64-linux/*/packages/**/*.h\n"
-                  "!/.toolchain/x86_64-linux/*/packages/**/third_party.cmake\n");
+                  "!/.toolchain/x86_64-linux/packages/**/*.h\n"
+                  "!/.toolchain/x86_64-linux/packages/**/*.hh\n"
+                  "!/.toolchain/x86_64-linux/packages/**/*.hpp\n");
     th_write_file(TH_PATH(base,
                           ".toolchain/x86_64-linux/toolchain-hash/packages/example/"
                           "install/include/example/api.h"),
                   "#pragma once\n");
-    th_write_file(TH_PATH(base, ".toolchain/x86_64-linux/toolchain-hash/packages/third_party.cmake"),
-                  "set(EXAMPLE_ENABLED ON)\n");
-    th_write_file(TH_PATH(base, ".toolchain/x86_64-linux/toolchain-hash/sysroot/include/leaked.h"),
+    th_write_file(TH_PATH(base, ".toolchain/x86_64-linux/toolchain-hash/packages/example/api.hh"),
                   "#pragma once\n");
+    th_write_file(TH_PATH(base, ".toolchain/x86_64-linux/toolchain-hash/packages/example/api.hpp"),
+                  "#pragma once\n");
+    th_write_file(TH_PATH(base, ".toolchain/x86_64-linux/toolchain-hash/packages/example/api.cc"),
+                  "int api() { return 0; }\n");
     th_write_file(TH_PATH(base,
-                          ".toolchain/x86_64-linux/toolchain-hash/cross-toolchain/include/leaked.h"),
+                          ".toolchain/x86_64-linux/inactive-hash/packages/include/leaked.h"),
                   "#pragma once\n");
-    th_write_file(TH_PATH(base, ".toolchain/aarch64-linux/toolchain-hash/packages/foreign.h"),
-                  "#pragma once\n");
+    char active_packages[512];
+    snprintf(active_packages, sizeof(active_packages), "%s/.toolchain/x86_64-linux/packages", base);
+    ASSERT_EQ(symlink("toolchain-hash/packages", active_packages), 0);
 
     cbm_file_info_t *files = NULL;
     int count = 0;
@@ -660,19 +662,20 @@ TEST(discover_cbmignore_negates_repo_gitignore) {
     ASSERT_EQ(cbm_discover(base, &opts, &files, &count), 0);
     ASSERT_TRUE(discover_has_rel_path(
         files, count,
-        ".toolchain/x86_64-linux/toolchain-hash/packages/example/install/include/example/api.h"));
+        ".toolchain/x86_64-linux/packages/example/install/include/example/api.h"));
     ASSERT_TRUE(discover_has_rel_path(
-        files, count, ".toolchain/x86_64-linux/toolchain-hash/packages/third_party.cmake"));
+        files, count, ".toolchain/x86_64-linux/packages/example/api.hh"));
+    ASSERT_TRUE(discover_has_rel_path(
+        files, count, ".toolchain/x86_64-linux/packages/example/api.hpp"));
     ASSERT_FALSE(discover_has_rel_path(
-        files, count, ".toolchain/x86_64-linux/toolchain-hash/sysroot/include/leaked.h"));
+        files, count, ".toolchain/x86_64-linux/packages/example/api.cc"));
     ASSERT_FALSE(discover_has_rel_path(
-        files, count, ".toolchain/x86_64-linux/toolchain-hash/cross-toolchain/include/leaked.h"));
-    ASSERT_FALSE(discover_has_rel_path(files, count,
-                                       ".toolchain/aarch64-linux/toolchain-hash/packages/foreign.h"));
+        files, count, ".toolchain/x86_64-linux/inactive-hash/packages/include/leaked.h"));
 
     cbm_discover_free(files, count);
     th_cleanup(base);
     PASS();
+#endif
 }
 
 /* issue #234: a directory listed in the root .gitignore (e.g. "vendor/") must

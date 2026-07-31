@@ -643,7 +643,7 @@ Anything outside this subset (write/`MERGE`/`CALL` clauses, unsupported function
 
 ## Ignoring Files
 
-Layered: hardcoded patterns (`.git`, `node_modules`, etc.) → `.gitignore` hierarchy → `.cbmignore` (project-specific, gitignore syntax). Symlinks are always skipped.
+Layered: hardcoded patterns (`.git`, `node_modules`, etc.) → `.gitignore` hierarchy → `.cbmignore` (project-specific, gitignore syntax). Symlinks are skipped unless a `.cbmignore` negated include explicitly requires a repository-local target.
 
 See [docs/cbmignore.md](docs/cbmignore.md) for the full `.cbmignore` how-to: syntax, precedence across the ignore layers, and negation semantics.
 

@@ -66,6 +66,11 @@ cbm_gitignore_t *cbm_gitignore_parse(const char *content);
  * rel_path should use '/' separators. is_dir indicates if path is a directory. */
 bool cbm_gitignore_matches(const cbm_gitignore_t *gi, const char *rel_path, bool is_dir);
 
+/* Return true when a negated rule could re-include a descendant of rel_dir.
+ * Discovery uses this to traverse otherwise-pruned ancestors without making
+ * the ancestor itself an indexed path. */
+bool cbm_gitignore_may_reinclude_descendant(const cbm_gitignore_t *gi, const char *rel_dir);
+
 /* Free a gitignore matcher. NULL-safe. */
 void cbm_gitignore_free(cbm_gitignore_t *gi);
 

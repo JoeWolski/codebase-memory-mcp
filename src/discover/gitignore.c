@@ -374,6 +374,50 @@ bool cbm_gitignore_matches(const cbm_gitignore_t *gi, const char *rel_path, bool
     return cbm_gitignore_match_result(gi, rel_path, is_dir) > 0;
 }
 
+/* A negated pattern can require opening an ignored directory before the
+ * pattern itself is encountered. Match its literal leading path components
+ * against rel_dir; globbed leading components are necessarily conservative. */
+static bool negated_pattern_may_match_descendant(const gi_pattern_t *p, const char *rel_dir) {
+    if (!p->negated || !p->rooted) {
+        return p->negated;
+    }
+
+    size_t literal_len = strcspn(p->pattern, "*?[");
+    while (literal_len > 0 && p->pattern[literal_len - 1] == '/') {
+        literal_len--;
+    }
+    size_t dir_len = strlen(rel_dir);
+    if (literal_len == 0) {
+        return true;
+    }
+
+    /* rel_dir is an ancestor of the pattern's literal prefix. */
+    if (dir_len < literal_len && strncmp(p->pattern, rel_dir, dir_len) == 0 &&
+        p->pattern[dir_len] == '/') {
+        return true;
+    }
+
+    /* A directory-negation applies to its descendants. A glob after the
+     * literal prefix may also match below this directory. */
+    if (dir_len >= literal_len && strncmp(rel_dir, p->pattern, literal_len) == 0 &&
+        (literal_len == dir_len || rel_dir[literal_len] == '/')) {
+        return p->dir_only || p->pattern[literal_len] != '\0';
+    }
+    return false;
+}
+
+bool cbm_gitignore_may_reinclude_descendant(const cbm_gitignore_t *gi, const char *rel_dir) {
+    if (!gi || !rel_dir || rel_dir[0] == '\0') {
+        return false;
+    }
+    for (int i = 0; i < gi->count; i++) {
+        if (negated_pattern_may_match_descendant(&gi->patterns[i], rel_dir)) {
+            return true;
+        }
+    }
+    return false;
+}
+
 void cbm_gitignore_free(cbm_gitignore_t *gi) {
     if (!gi) {
         return;
